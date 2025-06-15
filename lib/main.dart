@@ -213,10 +213,10 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
         }
       }
 
-      if (!deadline.isAfter(now)) {
-        _showErrorSnackBar('Срок должен быть в будущем');
-        return;
-      }
+        if (deadline == null || !deadline!.isAfter(now)) {
+          _showErrorSnackBar('Срок должен быть в будущем');
+          return;
+        }
       
       if (goal <= 0) {
         _showErrorSnackBar('Цель должна быть больше нуля');
@@ -233,15 +233,15 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
         return;
       }
 
-      setState(() {
-        _goalAmount = goal;
-        _currentAmount = current;
-        _previousAmount = current;
-        _isGoalSet = true;
-        _deadline = deadline;
-        _initialDuration = deadline.difference(now);
-        _remaining = _initialDuration;
-      });
+        setState(() {
+          _goalAmount = goal;
+          _currentAmount = current;
+          _previousAmount = current;
+          _isGoalSet = true;
+          _deadline = deadline;
+          _initialDuration = deadline!.difference(now);
+          _remaining = _initialDuration;
+        });
 
       _countdownTimer?.cancel();
       _countdownTimer =
