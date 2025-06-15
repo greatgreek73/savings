@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
@@ -57,6 +58,7 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
   final TextEditingController _goalController = TextEditingController();
   final TextEditingController _currentController = TextEditingController();
   final TextEditingController _addAmountController = TextEditingController();
+  final TextEditingController _deadlineController = TextEditingController();
 
   // Значения для отслеживания накоплений
   double _goalAmount = 0.0;
@@ -72,6 +74,11 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
   // Контроллер анимации для наполнения кувшина
   late AnimationController _animationController;
   late Animation<double> _fillAnimation;
+
+  DateTime? _deadline;
+  Timer? _countdownTimer;
+  Duration _initialDuration = Duration.zero;
+  Duration _remaining = Duration.zero;
 
   @override
   void initState() {
@@ -105,17 +112,32 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
       
       final savedGoal = prefs.getDouble('goalAmount');
       final savedCurrent = prefs.getDouble('currentAmount');
+      final savedDeadline = prefs.getInt('deadline');
       
       if (savedGoal != null && savedCurrent != null) {
+        final deadline = savedDeadline != null
+            ? DateTime.fromMillisecondsSinceEpoch(savedDeadline)
+            : null;
+        Duration remaining =
+            deadline != null ? deadline.difference(DateTime.now()) : Duration.zero;
         setState(() {
           _goalAmount = savedGoal;
           _currentAmount = savedCurrent;
           _previousAmount = savedCurrent;
           _isGoalSet = savedGoal > 0;
+          _deadline = deadline;
+          _initialDuration = remaining;
+          _remaining = remaining;
           _isLoading = false;
         });
-        
-        print('Данные загружены: цель=$_goalAmount, текущая сумма=$_currentAmount');
+
+        if (deadline != null && remaining > Duration.zero) {
+          _countdownTimer =
+              Timer.periodic(const Duration(seconds: 1), _updateRemaining);
+        }
+
+        print(
+            'Данные загружены: цель=$_goalAmount, текущая сумма=$_currentAmount, срок=$_deadline');
       } else {
         setState(() {
           _isLoading = false;
@@ -137,8 +159,14 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
       
       await prefs.setDouble('goalAmount', _goalAmount);
       await prefs.setDouble('currentAmount', _currentAmount);
+      if (_deadline != null) {
+        await prefs.setInt('deadline', _deadline!.millisecondsSinceEpoch);
+      } else {
+        await prefs.remove('deadline');
+      }
       
-      print('Данные сохранены: цель=$_goalAmount, текущая сумма=$_currentAmount');
+      print(
+          'Данные сохранены: цель=$_goalAmount, текущая сумма=$_currentAmount, срок=$_deadline');
     } catch (e) {
       print('Ошибка при сохранении данных: $e');
     }
@@ -150,6 +178,8 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
     _goalController.dispose();
     _currentController.dispose();
     _addAmountController.dispose();
+    _deadlineController.dispose();
+    _countdownTimer?.cancel();
     _animationController.dispose();
     super.dispose();
   }
@@ -157,14 +187,36 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
   // Метод для установки цели и начальной суммы
   void _setGoal() {
     // Проверка на корректность ввода
-    if (_goalController.text.isEmpty || _currentController.text.isEmpty) {
-      _showErrorSnackBar('Пожалуйста, введите цель и текущую сумму');
+    if (_goalController.text.isEmpty ||
+        _currentController.text.isEmpty ||
+        _deadlineController.text.isEmpty) {
+      _showErrorSnackBar('Пожалуйста, введите цель, сумму и срок');
       return;
     }
 
     try {
       final goal = double.parse(_goalController.text);
       final current = double.parse(_currentController.text);
+      final deadlineInput = _deadlineController.text.trim();
+      final now = DateTime.now();
+      DateTime? deadline;
+      final days = int.tryParse(deadlineInput);
+      if (days != null) {
+        deadline = now.add(Duration(days: days));
+      } else {
+        try {
+          deadline = DateTime.parse(deadlineInput);
+        } catch (_) {
+          _showErrorSnackBar(
+              'Введите срок в днях или дату в формате ГГГГ-ММ-ДД');
+          return;
+        }
+      }
+
+      if (!deadline.isAfter(now)) {
+        _showErrorSnackBar('Срок должен быть в будущем');
+        return;
+      }
       
       if (goal <= 0) {
         _showErrorSnackBar('Цель должна быть больше нуля');
@@ -186,14 +238,22 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
         _currentAmount = current;
         _previousAmount = current;
         _isGoalSet = true;
+        _deadline = deadline;
+        _initialDuration = deadline.difference(now);
+        _remaining = _initialDuration;
       });
-      
+
+      _countdownTimer?.cancel();
+      _countdownTimer =
+          Timer.periodic(const Duration(seconds: 1), _updateRemaining);
+
       // Сохраняем данные
       _saveData();
       
       // Сброс полей ввода
       _goalController.clear();
       _currentController.clear();
+      _deadlineController.clear();
       
     } catch (e) {
       _showErrorSnackBar('Пожалуйста, введите корректные числа');
@@ -240,6 +300,21 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
     }
   }
 
+  void _updateRemaining(Timer timer) {
+    if (_deadline == null) return;
+    final diff = _deadline!.difference(DateTime.now());
+    if (diff <= Duration.zero) {
+      timer.cancel();
+      setState(() {
+        _remaining = Duration.zero;
+      });
+    } else {
+      setState(() {
+        _remaining = diff;
+      });
+    }
+  }
+
   // Метод для отображения сообщения об ошибке
   void _showErrorSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -253,6 +328,10 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
 
   // Метод для сброса всех данных
   void _resetGoal() {
+    _countdownTimer?.cancel();
+    _deadline = null;
+    _initialDuration = Duration.zero;
+    _remaining = Duration.zero;
     setState(() {
       _isGoalSet = false;
       _goalAmount = 0.0;
@@ -335,6 +414,15 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
                 prefixIcon: Icon(Icons.account_balance_wallet),
               ),
             ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _deadlineController,
+              decoration: const InputDecoration(
+                labelText: 'Срок (дни или ГГГГ-ММ-ДД)',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.timer),
+              ),
+            ),
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: _setGoal,
@@ -376,13 +464,20 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
           ),
           const SizedBox(height: 32),
           
-          // Кувшин с накоплениями
-          SizedBox(
-            height: 300,
-            width: 200,
-            child: CustomPaint(
-              painter: JarPainter(fillPercentage: fillPercentage),
-            ),
+          // Кувшин и таймер
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                height: 300,
+                width: 200,
+                child: CustomPaint(
+                  painter: JarPainter(fillPercentage: fillPercentage),
+                ),
+              ),
+              const SizedBox(width: 20),
+              _buildTimeContainer(),
+            ],
           ),
           const SizedBox(height: 32),
           
@@ -415,6 +510,42 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
         ],
       ),
     );
+  }
+
+  Widget _buildTimeContainer() {
+    final progress = _initialDuration.inSeconds > 0
+        ? _remaining.inSeconds / _initialDuration.inSeconds
+        : 0.0;
+    return Column(
+      children: [
+        SizedBox(
+          height: 300,
+          width: 60,
+          child: CustomPaint(
+            painter: TimePainter(progress: progress),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _formatDuration(_remaining),
+          style: Theme.of(context).textTheme.bodyLarge,
+        ),
+      ],
+    );
+  }
+
+  String _formatDuration(Duration duration) {
+    final days = duration.inDays;
+    final hours = duration.inHours % 24;
+    final minutes = duration.inMinutes % 60;
+    final seconds = duration.inSeconds % 60;
+    if (days > 0) {
+      return '$days d ${hours.toString().padLeft(2, '0')}h';
+    }
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}h ${minutes.toString().padLeft(2, '0')}m';
+    }
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 }
 
@@ -563,5 +694,40 @@ class JarPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant JarPainter oldDelegate) {
     return oldDelegate.fillPercentage != fillPercentage;
+  }
+}
+
+class TimePainter extends CustomPainter {
+  final double progress;
+
+  TimePainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final borderPaint = Paint()
+      ..color = Colors.white30
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+    final rect = Rect.fromLTWH(0, 0, size.width, size.height);
+    canvas.drawRect(rect, borderPaint);
+
+    final fillHeight = size.height * progress;
+    final fillRect =
+        Rect.fromLTWH(0, size.height - fillHeight, size.width, fillHeight);
+    final fillPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Colors.purpleAccent.withOpacity(0.7),
+          Colors.purpleAccent.withOpacity(0.9),
+        ],
+      ).createShader(fillRect);
+    canvas.drawRect(fillRect, fillPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant TimePainter oldDelegate) {
+    return oldDelegate.progress != progress;
   }
 }
