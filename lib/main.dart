@@ -3,6 +3,9 @@ import 'dart:math' as math;
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Единицы времени для выбора срока
+enum TimeUnit { hours, days, months, years }
+
 void main() async {
   // Это важно для инициализации Flutter перед использованием SharedPreferences
   WidgetsFlutterBinding.ensureInitialized();
@@ -59,6 +62,9 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
   final TextEditingController _currentController = TextEditingController();
   final TextEditingController _addAmountController = TextEditingController();
   final TextEditingController _deadlineController = TextEditingController();
+
+  // Выбранная единица времени для срока
+  TimeUnit _selectedUnit = TimeUnit.days;
 
   // Значения для отслеживания накоплений
   double _goalAmount = 0.0;
@@ -200,15 +206,30 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
       final deadlineInput = _deadlineController.text.trim();
       final now = DateTime.now();
       DateTime? deadline;
-      final days = int.tryParse(deadlineInput);
-      if (days != null) {
-        deadline = now.add(Duration(days: days));
+      final value = int.tryParse(deadlineInput);
+      if (value != null) {
+        switch (_selectedUnit) {
+          case TimeUnit.hours:
+            deadline = now.add(Duration(hours: value));
+            break;
+          case TimeUnit.days:
+            deadline = now.add(Duration(days: value));
+            break;
+          case TimeUnit.months:
+            deadline = DateTime(
+                now.year, now.month + value, now.day, now.hour, now.minute, now.second);
+            break;
+          case TimeUnit.years:
+            deadline = DateTime(
+                now.year + value, now.month, now.day, now.hour, now.minute, now.second);
+            break;
+        }
       } else {
         try {
           deadline = DateTime.parse(deadlineInput);
         } catch (_) {
           _showErrorSnackBar(
-              'Введите срок в днях или дату в формате ГГГГ-ММ-ДД');
+              'Введите срок числом или дату в формате ГГГГ-ММ-ДД');
           return;
         }
       }
@@ -415,13 +436,49 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
               ),
             ),
             const SizedBox(height: 16),
-            TextField(
-              controller: _deadlineController,
-              decoration: const InputDecoration(
-                labelText: 'Срок (дни или ГГГГ-ММ-ДД)',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.timer),
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _deadlineController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Срок',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.timer),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                DropdownButton<TimeUnit>(
+                  value: _selectedUnit,
+                  onChanged: (unit) {
+                    if (unit != null) {
+                      setState(() {
+                        _selectedUnit = unit;
+                      });
+                    }
+                  },
+                  items: const [
+                    DropdownMenuItem(
+                      value: TimeUnit.hours,
+                      child: Text('часы'),
+                    ),
+                    DropdownMenuItem(
+                      value: TimeUnit.days,
+                      child: Text('дни'),
+                    ),
+                    DropdownMenuItem(
+                      value: TimeUnit.months,
+                      child: Text('месяца'),
+                    ),
+                    DropdownMenuItem(
+                      value: TimeUnit.years,
+                      child: Text('года'),
+                    ),
+                  ],
+                ),
+              ],
             ),
             const SizedBox(height: 24),
             ElevatedButton(
