@@ -525,12 +525,23 @@ class _SavingsJarScreenState extends State<SavingsJarScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(
-                height: 300,
-                width: 200,
-                child: CustomPaint(
-                  painter: JarPainter(fillPercentage: fillPercentage),
-                ),
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  SizedBox(
+                    height: 300,
+                    width: 200,
+                    child: CustomPaint(
+                      painter: JarFillPainter(fillPercentage: fillPercentage),
+                    ),
+                  ),
+                  Image.asset(
+                    'assets/images/Jug.png',
+                    height: 300,
+                    width: 200,
+                    fit: BoxFit.contain,
+                  ),
+                ],
               ),
               const SizedBox(width: 20),
               _buildTimeContainer(),
@@ -750,6 +761,73 @@ class JarPainter extends CustomPainter {
   
   @override
   bool shouldRepaint(covariant JarPainter oldDelegate) {
+    return oldDelegate.fillPercentage != fillPercentage;
+  }
+}
+
+class JarFillPainter extends CustomPainter {
+  final double fillPercentage;
+
+  JarFillPainter({required this.fillPercentage});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final width = size.width;
+    final height = size.height;
+
+    final jarWidth = width * 0.8;
+    final jarHeight = height * 0.85;
+    final jarLeft = (width - jarWidth) / 2;
+    final jarTop = height * 0.1;
+    final jarBottom = jarTop + jarHeight;
+
+    final neckWidth = jarWidth * 0.5;
+    final neckHeight = jarHeight * 0.15;
+    final neckLeft = jarLeft + (jarWidth - neckWidth) / 2;
+
+    final fillPath = Path();
+
+    final fillHeight = jarHeight * fillPercentage;
+    final fillTop = jarBottom - fillHeight;
+
+    if (fillTop <= jarTop + neckHeight) {
+      final neckFillTop = math.max(fillTop, jarTop);
+      fillPath.moveTo(neckLeft, neckFillTop);
+      if (neckFillTop == jarTop) {
+        fillPath.lineTo(neckLeft + neckWidth, jarTop);
+      }
+      fillPath.lineTo(neckLeft + neckWidth, jarTop + neckHeight);
+      fillPath.lineTo(jarLeft + jarWidth, jarTop + neckHeight);
+      fillPath.lineTo(jarLeft + jarWidth, jarBottom);
+      fillPath.lineTo(jarLeft, jarBottom);
+      fillPath.lineTo(jarLeft, jarTop + neckHeight);
+      fillPath.lineTo(neckLeft, jarTop + neckHeight);
+      if (neckFillTop > jarTop) {
+        fillPath.lineTo(neckLeft, neckFillTop);
+      }
+    } else {
+      fillPath.moveTo(jarLeft, fillTop);
+      fillPath.lineTo(jarLeft + jarWidth, fillTop);
+      fillPath.lineTo(jarLeft + jarWidth, jarBottom);
+      fillPath.lineTo(jarLeft, jarBottom);
+      fillPath.close();
+    }
+
+    final fillPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [
+          Colors.tealAccent.withOpacity(0.7),
+          Colors.tealAccent.withOpacity(0.9),
+        ],
+      ).createShader(Rect.fromLTWH(jarLeft, fillTop, jarWidth, jarBottom - fillTop));
+
+    canvas.drawPath(fillPath, fillPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant JarFillPainter oldDelegate) {
     return oldDelegate.fillPercentage != fillPercentage;
   }
 }
